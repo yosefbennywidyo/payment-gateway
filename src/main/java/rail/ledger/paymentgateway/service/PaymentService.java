@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 import rail.ledger.paymentgateway.client.LedgerServiceClient;
+import rail.ledger.paymentgateway.client.LedgerServiceConflictException;
 import rail.ledger.paymentgateway.client.LedgerServiceException;
 import rail.ledger.paymentgateway.client.LedgerServiceUnavailableException;
 import rail.ledger.paymentgateway.dto.LedgerEntry;
@@ -40,10 +41,11 @@ public class PaymentService {
         }
 
         PaymentResult result = callLedgerService(request);
-        if (result.httpStatus() != 502) {
-            // Only cache a definitive outcome from ledger-service (success or business
-            // rejection). A 502 means we don't actually know whether ledger-service processed
-            // the request, so caching it would block legitimate retries once it's back up.
+        if (result.httpStatus() != 502 && result.httpStatus() != 409) {
+            // 502: we don't know whether ledger-service processed the request.
+            // 409: it's telling us a twin request is still in flight right now —
+            // caching that would wedge every future retry of this key behind a
+            // stale "still processing" answer. Neither is a definitive outcome.
             idempotencyStore.save(request.idempotencyKey(), result);
         }
         return result;
@@ -56,6 +58,8 @@ public class PaymentService {
             return new PaymentResult(201, "{\"status\":\"completed\"}");
         } catch (LedgerServiceException businessRejection) {
             return new PaymentResult(422, businessRejection.getMessage());
+        } catch (LedgerServiceConflictException conflict) {
+            return new PaymentResult(409, conflict.getMessage());
         } catch (LedgerServiceUnavailableException unavailable) {
             return new PaymentResult(502, "ledger-service unavailable: " + unavailable.getMessage());
         }

@@ -17,6 +17,7 @@ import rail.ledger.paymentgateway.dto.LedgerTransactionRequest;
  * need to know about HTTP status codes:
  * <ul>
  *   <li>201 -&gt; returns normally</li>
+ *   <li>409 -&gt; {@link LedgerServiceConflictException} (same idempotency key still in flight)</li>
  *   <li>422 -&gt; {@link LedgerServiceException} (business rejection, e.g. insufficient balance)</li>
  *   <li>anything else (400, 5xx, timeout, connection refused) -&gt; {@link LedgerServiceUnavailableException}</li>
  * </ul>
@@ -48,6 +49,7 @@ public class LedgerServiceClient {
     /**
      * Posts a balanced double-entry transaction to ledger-service.
      *
+     * @throws LedgerServiceConflictException    on HTTP 409 (same idempotency key still in flight)
      * @throws LedgerServiceException            on business rejection (HTTP 422)
      * @throws LedgerServiceUnavailableException on any other failure (unreachable, timeout, 4xx/5xx)
      */
@@ -61,6 +63,9 @@ public class LedgerServiceClient {
         } catch (HttpStatusCodeException e) {
             if (e.getStatusCode() == HttpStatusCode.valueOf(422)) {
                 throw new LedgerServiceException(e.getResponseBodyAsString());
+            }
+            if (e.getStatusCode() == HttpStatusCode.valueOf(409)) {
+                throw new LedgerServiceConflictException(e.getResponseBodyAsString());
             }
             throw new LedgerServiceUnavailableException(
                     "ledger-service returned unexpected status " + e.getStatusCode(), e);
