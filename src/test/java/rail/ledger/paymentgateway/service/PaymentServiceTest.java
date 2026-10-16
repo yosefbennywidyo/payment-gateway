@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import rail.ledger.paymentgateway.client.LedgerServiceClient;
+import rail.ledger.paymentgateway.client.LedgerServiceConflictException;
 import rail.ledger.paymentgateway.client.LedgerServiceException;
 import rail.ledger.paymentgateway.client.LedgerServiceUnavailableException;
 import rail.ledger.paymentgateway.dto.LedgerEntry;
@@ -85,6 +86,19 @@ class PaymentServiceTest {
         PaymentResult result = service.process(request);
 
         assertThat(result.httpStatus()).isEqualTo(502);
+        verify(idempotencyStore, never()).save(any(), any());
+    }
+
+    @Test
+    void propagatesConflictAs409AndDoesNotCacheIt() {
+        when(idempotencyStore.find("idem-key-1")).thenReturn(Optional.empty());
+        doThrow(new LedgerServiceConflictException("idempotency key still processing"))
+                .when(ledgerServiceClient).postTransaction(any());
+
+        PaymentService service = new PaymentService(idempotencyStore, ledgerServiceClient);
+        PaymentResult result = service.process(request);
+
+        assertThat(result.httpStatus()).isEqualTo(409);
         verify(idempotencyStore, never()).save(any(), any());
     }
 
